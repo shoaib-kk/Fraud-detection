@@ -1,0 +1,4 @@
+{
+    "C": 100,
+    "solver": "liblinear"
+}

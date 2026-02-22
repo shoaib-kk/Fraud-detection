@@ -1,0 +1,22 @@
+{
+    "trained_at": "2026-02-22T01:21:13.685492Z",
+    "average_precision_score": 0.7205830801879841,
+    "roc_auc_score": 0.9746284188267315,
+    "precision": 0.009802888162749025,
+    "recall": 0.9489795918367347,
+    "f1_score": 0.01940532081377152,
+    "confusion_matrix": [
+        [
+            47470,
+            9394
+        ],
+        [
+            5,
+            93
+        ]
+    ],
+    "false_negatives": 5,
+    "false_positives": 9394,
+    "classification_report": "              precision    recall  f1-score   support\n\n           0       1.00      0.83      0.91     56864\n           1       0.01      0.95      0.02        98\n\n    accuracy                           0.83     56962\n   macro avg       0.50      0.89      0.46     56962\nweighted avg       1.00      0.83      0.91     56962\n",
+    "summary": "APS: 0.7206 | ROC-AUC: 0.9746 | Precision@0.10: 0.0098 | Recall@0.10: 0.9490 | F1: 0.0194\nConfusion matrix [[TN, FP], [FN, TP]]: [[47470, 9394], [5, 93]]\n              precision    recall  f1-score   support\n\n           0       1.00      0.83      0.91     56864\n           1       0.01      0.95      0.02        98\n\n    accuracy                           0.83     56962\n   macro avg       0.50      0.89      0.46     56962\nweighted avg       1.00      0.83      0.91     56962\n"
+}
