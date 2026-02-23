@@ -8,8 +8,7 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix,
     classification_report,
-    precision_recall_curve,
-    roc_curve
+
 )
 
 def evaluate_model(y_true, y_pred_proba, threshold=0.1):
@@ -48,3 +47,31 @@ def evaluate_model(y_true, y_pred_proba, threshold=0.1):
         "classification_report": class_report,
         "summary": summary,
     }
+
+
+def choose_best_threshold(
+    y_true,
+    y_pred_proba,
+    false_negative_cost=10,
+    false_positive_cost=1,
+    thresholds=None
+):
+    y_true = np.asarray(y_true)
+    y_pred_proba = np.asarray(y_pred_proba)
+
+    if thresholds is None:
+        thresholds = np.unique(y_pred_proba)
+
+    best_t = 0.5
+    best_cost = float("inf")
+
+    for t in thresholds:
+        y_pred = (y_pred_proba >= t).astype(int)
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+        cost = fn * false_negative_cost + fp * false_positive_cost
+
+        if cost < best_cost:
+            best_cost = cost
+            best_t = float(t)
+
+    return best_t, best_cost
