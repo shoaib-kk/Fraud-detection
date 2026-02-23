@@ -1,4 +1,5 @@
 import argparse
+import matplotlib.pyplot as plt
 
 from logistic_regression_baseline import grid_search_logistic_regression
 from preprocessing import read_data, train_val_test_split, seperate_features_and_target, clean_data, distribution
@@ -120,10 +121,27 @@ def test(build_new_models: bool = False):
     save_model(lgb_model, "lightgbm", lgb_metrics, lightgbm_params)
     save_model(best_model, "logistic_regression", lgr_metrics, best_params)
 
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharex=True, sharey=True)
+
+    axes[0].hist(lgb_y_pred_proba, bins=50)
+    axes[0].set_title("LightGBM")
+    axes[0].set_xlabel("Predicted probability")
+    axes[0].set_ylabel("Count")
+
+    axes[1].hist(lgr_y_pred_proba, bins=50)
+    axes[1].set_title("Logistic Regression")
+    axes[1].set_xlabel("Predicted probability")
+
+    fig.suptitle("Prediction Probability Distribution", fontsize=12)
+    fig.tight_layout()
+    plt.show()
+
 
 def main():
     retrain = False  # Set to True to force retraining of models, False to load existing models if available
     test(build_new_models=retrain)
+
+
 if __name__ == "__main__":
     main()
 
