@@ -1,13 +1,11 @@
-import argparse
 import matplotlib.pyplot as plt
-
 from logistic_regression_baseline import grid_search_logistic_regression
 from preprocessing import read_data, train_val_test_split, seperate_features_and_target, clean_data, distribution
 from feature_engineering import engineer_features
-from lightGBM_main_model import train_lightgbm
 from utilities import setup_logger
 from save_models import save_model, load_model
 from evaluation_metrics import evaluate_model
+from generate_val_predictions import load_or_train_lightgbm
 logger = setup_logger(__name__)
 
 def test(build_new_models: bool = False):
@@ -45,68 +43,14 @@ def test(build_new_models: bool = False):
             best_params, best_score, best_model = grid_search_logistic_regression(X_train, y_train, X_val, y_val, param_grid)
             logger.info(f"Best parameters: {best_params}, Best score: {best_score:.4f}")
 
-    # Load or train LightGBM
-    if build_new_models:
-        logger.info("Retraining LightGBM model.")
-        lightgbm_params = {
-            'objective': 'binary',
-            'metric': 'average_precision',
-            'boosting_type': 'gbdt',
-            'learning_rate': 0.03,
-            'num_leaves': 64,
-            'min_data_in_leaf': 32,
-            'feature_fraction': 0.85,
-            'bagging_fraction': 0.8,
-            'bagging_freq': 5,
-            'max_depth': -1,
-            'n_jobs': -1,
-            'verbose': -1,
-        }
-        lgb_model, lgb_aps = train_lightgbm(
-            X_train,
-            y_train,
-            X_val,
-            y_val,
-            lightgbm_params,
-            num_boost_round=2000,
-            early_stopping_rounds=100,
-            verbose_eval=50,
-        )
-        logger.info(f"LightGBM Average Precision Score: {lgb_aps:.4f}")
-    else:
-        try:
-            lgb_model, lgb_loaded_metrics, lightgbm_params = load_model("lightgbm")
-            lgb_aps = lgb_loaded_metrics.get("average_precision_score") or lgb_loaded_metrics.get("average_precision")
-            logger.info("Loaded existing LightGBM model.")
-        except FileNotFoundError:
-            logger.info("No existing LightGBM model found. Proceeding with training.")
-
-            lightgbm_params = {
-                'objective': 'binary',
-                'metric': 'average_precision',
-                'boosting_type': 'gbdt',
-                'learning_rate': 0.03,
-                'num_leaves': 64,
-                'min_data_in_leaf': 32,
-                'feature_fraction': 0.85,
-                'bagging_fraction': 0.8,
-                'bagging_freq': 5,
-                'max_depth': -1,
-                'n_jobs': -1,
-                'verbose': -1,
-            }
-            lgb_model, lgb_aps = train_lightgbm(
-                X_train,
-                y_train,
-                X_val,
-                y_val,
-                lightgbm_params,
-                num_boost_round=2000,
-                early_stopping_rounds=100,
-                verbose_eval=50,
-            )
-
-            logger.info(f"LightGBM Average Precision Score: {lgb_aps:.4f}")
+    lgb_model, lightgbm_params, lgb_loaded_metrics = load_or_train_lightgbm(
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        retrain=build_new_models,
+    )
+    lgb_aps = lgb_loaded_metrics.get("average_precision_score")
 
     lgb_y_pred_proba = lgb_model.predict(X_test, num_iteration=lgb_model.best_iteration)
     lgr_y_pred_proba = best_model.predict_proba(X_test)[:, 1]
