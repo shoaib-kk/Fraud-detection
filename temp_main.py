@@ -82,7 +82,7 @@ def test(build_new_models: bool = False):
 
 
 def main():
-    retrain = False  # Set to True to force retraining of models, False to load existing models if available
+    retrain = True  # Set to True to force retraining of models, False to load existing models if available
     test(build_new_models=retrain)
 
 
