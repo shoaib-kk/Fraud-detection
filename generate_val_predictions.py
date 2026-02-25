@@ -9,7 +9,7 @@ from utilities import setup_logger
 
 logger = setup_logger(__name__)
 
-def load_or_train_lightgbm(X_train, y_train, X_val, y_val, retrain: bool):
+def load_or_train_lightgbm(X_train, y_train, X_val, y_val, retrain: bool = True):
     lightgbm_params = {
         "objective": "binary",
         "metric": "average_precision",
@@ -48,7 +48,7 @@ def load_or_train_lightgbm(X_train, y_train, X_val, y_val, retrain: bool):
     return model, lightgbm_params, {"average_precision_score": aps}
 
 
-def main(retrain: bool = False) -> None:
+def main() -> None:
 
     data = read_data()
     data = clean_data(data)
@@ -58,7 +58,7 @@ def main(retrain: bool = False) -> None:
     X_val, y_val = seperate_features_and_target(val_df)
     X_test, y_test = seperate_features_and_target(test_df)
 
-    model, params, metrics = load_or_train_lightgbm(X_train, y_train, X_val, y_val, retrain)
+    model, params, metrics = load_or_train_lightgbm(X_train, y_train, X_val, y_val)
     logger.info("Using LightGBM params: %s", params)
 
     best_iter = model.best_iteration or None
