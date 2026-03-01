@@ -2,12 +2,12 @@ import lightgbm as lgb
 from sklearn.metrics import average_precision_score
 
 
-def _compute_scale_pos_weight(y):
+def _compute_scale_pos_weight(y, multiplier: float = 1.0):
     positive = (y == 1).sum()
     negative = len(y) - positive
     if positive == 0:
         return 1.0
-    return negative / positive
+    return (negative / positive) * multiplier
 
 
 def train_lightgbm(
@@ -19,6 +19,7 @@ def train_lightgbm(
     num_boost_round: int = 2000,
     early_stopping_rounds: int = 100,
     verbose_eval: int | bool = False,
+    pos_weight_multiplier: float | None = None,
 ):
 
     base_params = {
@@ -39,7 +40,8 @@ def train_lightgbm(
     params = params or {}
     final_params = {**base_params, **params}
     if "scale_pos_weight" not in final_params:
-        final_params["scale_pos_weight"] = _compute_scale_pos_weight(y_train)
+        multiplier = 1.0 if pos_weight_multiplier is None else pos_weight_multiplier
+        final_params["scale_pos_weight"] = _compute_scale_pos_weight(y_train, multiplier)
 
     train_data = lgb.Dataset(X_train, label=y_train)
     val_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
