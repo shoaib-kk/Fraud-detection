@@ -1,5 +1,4 @@
 import sys
-import json
 import subprocess
 import numpy as np
 import pandas as pd
@@ -7,36 +6,12 @@ from pathlib import Path
 import streamlit as st
 import matplotlib.pyplot as plt
 from sklearn.metrics import average_precision_score, roc_auc_score
-from pipeline import split_for_training, build_feature_sets, load_or_train_models
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
-
-def confusion_counts(y_true, y_pred):
-    true_p = np.sum((y_true == 1) & (y_pred == 1))
-    true_n = np.sum((y_true == 0) & (y_pred == 0))
-    false_p = np.sum((y_true == 0) & (y_pred == 1))
-    false_n = np.sum((y_true == 1) & (y_pred == 0))
-    return {"true_positive": true_p, "true_negative": true_n, "false_positive": false_p, "false_negative": false_n}
-def point_metrics(counts: dict):
-    true_positive = counts["true_positive"]
-    false_positive = counts["false_positive"]
-    false_negative = counts["false_negative"]
-    precision = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0
-    recall = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0
-    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-    return {"precision": precision, "recall": recall, "f1": f1}
-
-
-def _load_json(path: Path):
-    if not path.exists():
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    sys.path.insert(0, str(PROJECT_ROOT))
+from pipeline import split_for_training, build_feature_sets, load_or_train_models
+from evaluation_metrics import confusion_counts, point_metrics
+from utilities import load_json
 
 
 @st.cache_data(show_spinner=False)
@@ -240,7 +215,7 @@ for col, (label, path) in zip(cols, artifacts.items()):
         col.warning(f"Missing artifact: {path}")
 
 calib_metrics_path = interp_dir / "calibration_metrics.json"
-calib_metrics = _load_json(calib_metrics_path)
+calib_metrics = load_json(calib_metrics_path)
 if calib_metrics:
     st.markdown("**Calibration APS (LightGBM)**")
     st.json(calib_metrics, expanded=False)
@@ -264,7 +239,7 @@ model_specs = {
 status_rows = []
 for name, spec in model_specs.items():
     model_exists = spec["model"].exists()
-    metrics = _load_json(spec["metrics"])
+    metrics = load_json(spec["metrics"])
     trained_at = metrics.get("trained_at") if metrics else None
     status_rows.append({
         "Model": name,

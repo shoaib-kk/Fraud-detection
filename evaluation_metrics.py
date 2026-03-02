@@ -11,6 +11,39 @@ from sklearn.metrics import (
 
 )
 
+
+def confusion_counts(y_true, y_pred):
+    """Return basic confusion counts for binary labels."""
+    true_p = np.sum((y_true == 1) & (y_pred == 1))
+    true_n = np.sum((y_true == 0) & (y_pred == 0))
+    false_p = np.sum((y_true == 0) & (y_pred == 1))
+    false_n = np.sum((y_true == 1) & (y_pred == 0))
+    return {
+        "true_positive": true_p,
+        "true_negative": true_n,
+        "false_positive": false_p,
+        "false_negative": false_n,
+    }
+
+
+def point_metrics(counts: dict):
+    """Compute precision/recall/f1 from confusion counts."""
+    true_positive = counts["true_positive"]
+    false_positive = counts["false_positive"]
+    false_negative = counts["false_negative"]
+    precision = (
+        true_positive / (true_positive + false_positive)
+        if (true_positive + false_positive) > 0
+        else 0
+    )
+    recall = (
+        true_positive / (true_positive + false_negative)
+        if (true_positive + false_negative) > 0
+        else 0
+    )
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    return {"precision": precision, "recall": recall, "f1": f1}
+
 def evaluate_model(y_true, y_pred_proba, threshold=0.1):
 
     # Threshold shoule be relatively low for fraud detection to catch more positives, 

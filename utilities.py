@@ -1,3 +1,4 @@
+import json
 import logging
 import sys
 from pathlib import Path
@@ -32,3 +33,14 @@ def setup_logger(name, log_file: str | Path = "logs/testing.log"):
         logger.addHandler(file_handler)
 
     return logger
+
+
+def load_json(path: Path):
+    """Safely load JSON; returns None on missing file or parse errors."""
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
