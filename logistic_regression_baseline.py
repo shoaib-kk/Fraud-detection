@@ -33,7 +33,7 @@ def train_logistic_regression(X_train, y_train, params):
 
     pipeline = Pipeline([
         ("scaler", StandardScaler()),
-        ("model", LogisticRegression(max_iter=1000, class_weight='balanced', random_state=42, **params))
+        ("model", LogisticRegression(max_iter=1000, random_state=42, **params))
     ])
     pipeline.fit(X_train, y_train)
     return pipeline

@@ -1,13 +1,13 @@
 import sys
+import json
+import subprocess
 import numpy as np
 import pandas as pd
 from pathlib import Path
 import streamlit as st
 import matplotlib.pyplot as plt
-from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score
-from lightGBM_main_model import train_lightgbm
-from logistic_regression_baseline import train_logistic_regression
-from preprocessing import clean_data, read_data, seperate_features_and_target, train_val_test_split
+from sklearn.metrics import average_precision_score, roc_auc_score
+from pipeline import split_for_training, build_feature_sets, load_or_train_models
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -29,69 +29,70 @@ def point_metrics(counts: dict):
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
+def _load_json(path: Path):
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 @st.cache_data(show_spinner=False)
-def load_and_split_data():
-    data = read_data()
-    data = clean_data(data)
-    train_df, val_df, _ = train_val_test_split(data, test_size=0.2, val_size=0.1, random_state=42, time_based=False)
-    return train_df, val_df
+def load_feature_sets():
+    splits = split_for_training(time_based=True)
+    return build_feature_sets(*splits)
 
 
 @st.cache_resource(show_spinner=True)
-def train_models(train_df, val_df):
-    X_train, y_train = seperate_features_and_target(train_df)
-    X_val, y_val = seperate_features_and_target(val_df)
-
-    logistic_regression = train_logistic_regression(X_train, y_train, {"C": 1.0, "solver": "lbfgs"})
-    lgb_model, _ = train_lightgbm(
-        X_train,
-        y_train,
-        X_val,
-        y_val,
-        params={
-            "num_leaves": 128,
-            "min_data_in_leaf": 16,
-            "feature_fraction": 1.0,
-            "bagging_fraction": 1.0,
-            "bagging_freq": 0,
-        },
-        num_boost_round=1500,
-        early_stopping_rounds=100,
-        verbose_eval=False,
-        pos_weight_multiplier=0.5,
-    )
-
-    preds = {
-        "LightGBM": lgb_model.predict(X_val, num_iteration=lgb_model.best_iteration or lgb_model.num_trees()),
-        "Logistic Regression": logistic_regression.predict_proba(X_val)[:, 1],
-    }
-    return y_val.values, preds
+def load_models(retrain: bool):
+    features = load_feature_sets()
+    return load_or_train_models(features, retrain=retrain)
 
 
 st.title("Fraud Model Comparison")
-st.caption("Comparison of LightGBM vs Logistic Regression on the validation set.")
+st.caption("Comparison of LightGBM vs Logistic Regression — validation metrics shown by default; toggle to view held-out test metrics.")
 
 with st.sidebar:
     st.header("Controls")
-    threshold = st.slider("Decision threshold", min_value=0.0, max_value=1.0, value=0.1, step=0.01)
+    threshold = st.slider("Decision threshold", min_value=0.0, max_value=1.0, value=0.1, step=0.01,
+        help="Fraud often uses a low threshold to maximize recall; adjust based on cost and flagged rate.")
+    st.caption("At threshold {:.2f}, you'll see flagged rate/recall/cost below.".format(threshold))
     st.divider()
     false_positive_cost = st.number_input("False positive cost", min_value=0.0, value=1.0, step=0.1)
     false_negative_cost = st.number_input("False negative cost", min_value=0.0, value=10.0, step=0.1)
+    st.divider()
+    retrain_clicked = st.button(
+        "Run training script (temp_main.py)",
+        help="Runs the full pipeline including SHAP and calibration. May take a few minutes.",
+    )
 
 
-with st.spinner("Loading data and training models"):
-    train_df, val_df = load_and_split_data()
-    y_val, model_preds = train_models(train_df, val_df)
+with st.spinner("Loading data, features, and models"):
+    features = load_feature_sets()
+    # If the sidebar retrain button was clicked, reload models with retrain=True
+    models = load_models(retrain=retrain_clicked)
+    y_val = features["y_calib"].values
+    y_test = features["y_test"].values
+    model_preds_val = {
+        "LightGBM": models["lgb_model"].predict_proba(features["X_calib"])[:, 1],
+        "Logistic Regression": models["log_model"].predict_proba(features["X_calib"])[:, 1],
+    }
+    model_preds_test = {
+        "LightGBM": models["lgb_model"].predict_proba(features["X_test"])[:, 1],
+        "Logistic Regression": models["log_model"].predict_proba(features["X_test"])[:, 1],
+    }
 
 
-def summarize_model(name, proba):
+def summarize_model(name, proba, y_true):
     y_pred = (proba >= threshold).astype(int)
-    counts = confusion_counts(y_val, y_pred)
+    counts = confusion_counts(y_true, y_pred)
     metrics = point_metrics(counts)
     flagged_rate = float((y_pred == 1).mean())
     est_cost = counts["false_positive"] * false_positive_cost + counts["false_negative"] * false_negative_cost
-    aps = average_precision_score(y_val, proba)
-    roc_auc = roc_auc_score(y_val, proba)
+    aps = average_precision_score(y_true, proba)
+    roc_auc = roc_auc_score(y_true, proba)
     return {
         "Model": name,
         "Flagged Rate": flagged_rate,
@@ -108,25 +109,26 @@ def summarize_model(name, proba):
     }
 
 
-summary_rows = [summarize_model(name, proba) for name, proba in model_preds.items()]
-summary_df = pd.DataFrame(summary_rows).set_index("Model")
+summary_rows_val = [summarize_model(name, proba, y_val) for name, proba in model_preds_val.items()]
+summary_rows_test = [summarize_model(name, proba, y_test) for name, proba in model_preds_test.items()]
+summary_df_val = pd.DataFrame(summary_rows_val).set_index("Model")
+summary_df_test = pd.DataFrame(summary_rows_test).set_index("Model")
 
 
 
-# Highlight models with the best APS and ROC-AUC
-best_aps_model = summary_df["APS"].idxmax()
-best_aps_value = summary_df.loc[best_aps_model, "APS"]
-best_roc_model = summary_df["ROC-AUC"].idxmax()
-best_roc_value = summary_df.loc[best_roc_model, "ROC-AUC"]
+st.markdown("**Validation metrics (calibration split, not test)**")
 
+# Highlight models with the best APS and ROC-AUC on validation
+best_aps_model = summary_df_val["APS"].idxmax()
+best_aps_value = summary_df_val.loc[best_aps_model, "APS"]
+best_roc_model = summary_df_val["ROC-AUC"].idxmax()
+best_roc_value = summary_df_val.loc[best_roc_model, "ROC-AUC"]
 
-st.metric("Best APS", f"{best_aps_model}: {best_aps_value:.4f}")
+st.metric("Best APS (val)", f"{best_aps_model}: {best_aps_value:.4f}")
+st.metric("Best ROC-AUC (val)", f"{best_roc_model}: {best_roc_value:.4f}")
 
-st.metric("Best ROC-AUC", f"{best_roc_model}: {best_roc_value:.4f}")
-
-# Display summary table 
 st.dataframe(
-    summary_df.style.format({
+    summary_df_val.style.format({
         "Flagged Rate": "{:.2%}",
         "Precision": "{:.4f}",
         "Recall": "{:.4f}",
@@ -138,14 +140,34 @@ st.dataframe(
     width="stretch",
 )
 
-st.divider()
-st.subheader("Precision-Recall Curves")
+st.info(
+    "Fraud framing: default threshold 0.10 leans toward high recall. Adjust costs/threshold to trade off flagged rate vs missed fraud; the table above shows the operational impact (flagged %, caught fraud, estimated cost)."
+)
 
-# Evaluate metrics across thresholds
-thresholds = np.linspace(0, 1, 51)
+show_test = st.checkbox("Show test-set metrics", value=False, help="Test set is held-out and never used for training or calibration.")
+if show_test:
+    st.markdown("**Test metrics (held-out)**")
+    st.dataframe(
+        summary_df_test.style.format({
+            "Flagged Rate": "{:.2%}",
+            "Precision": "{:.4f}",
+            "Recall": "{:.4f}",
+            "F1": "{:.4f}",
+            "APS": "{:.4f}",
+            "ROC-AUC": "{:.4f}",
+            "Estimated Cost": "${:,.2f}",
+        }),
+        width="stretch",
+    )
+
+st.divider()
+st.subheader("Threshold Analysis (validation/calibration set)")
+
+# Evaluate metrics across thresholds on calibration/validation split
+threshold_grid = np.linspace(0, 1, 51)
 curve_records = []
-for name, proba in model_preds.items():
-    for t in thresholds:
+for name, proba in model_preds_val.items():
+    for t in threshold_grid:
         y_pred = (proba >= t).astype(int)
         counts = confusion_counts(y_val, y_pred)
         metrics = point_metrics(counts)
@@ -195,13 +217,81 @@ ax_bottom.set_ylabel("Estimated Cost")
 ax_bottom.grid(True, linestyle="--", alpha=0.4)
 ax_bottom.legend()
 
-st.divider()
-st.subheader("Threshold Analysis")
-
 st.pyplot(fig_threshold, width="stretch")
 
 st.divider()
 st.subheader("Explanation of Metrics")
+
+st.divider()
+st.subheader("Interpretability & Calibration (artifacts)")
+
+interp_dir = Path("logs/interpretability")
+artifacts = {
+    "SHAP summary": interp_dir / "shap_summary.png",
+    "Single transaction SHAP": interp_dir / "shap_single.png",
+    "Reliability (calibration)": interp_dir / "reliability_lightgbm.png",
+}
+
+cols = st.columns(len(artifacts))
+for col, (label, path) in zip(cols, artifacts.items()):
+    if path.exists():
+        col.image(str(path), caption=label, use_container_width=True)
+    else:
+        col.warning(f"Missing artifact: {path}")
+
+calib_metrics_path = interp_dir / "calibration_metrics.json"
+calib_metrics = _load_json(calib_metrics_path)
+if calib_metrics:
+    st.markdown("**Calibration APS (LightGBM)**")
+    st.json(calib_metrics, expanded=False)
+else:
+    st.info(f"Calibration metrics not found at {calib_metrics_path}.")
+
+st.divider()
+st.subheader("Model Status")
+
+model_specs = {
+    "LightGBM": {
+        "model": Path("models/lightgbm.pkl"),
+        "metrics": Path("models/lightgbm_metrics.json"),
+    },
+    "Logistic Regression": {
+        "model": Path("models/logistic_regression.pkl"),
+        "metrics": Path("models/logistic_regression_metrics.json"),
+    },
+}
+
+status_rows = []
+for name, spec in model_specs.items():
+    model_exists = spec["model"].exists()
+    metrics = _load_json(spec["metrics"])
+    trained_at = metrics.get("trained_at") if metrics else None
+    status_rows.append({
+        "Model": name,
+        "Model file": "yes" if model_exists else "no",
+        "Metrics file": "yes" if metrics else "no",
+        "Trained at": trained_at or "n/a",
+    })
+
+status_df = pd.DataFrame(status_rows).set_index("Model")
+st.dataframe(status_df)
+
+st.caption("Retraining is optional. Use the sidebar button to run `temp_main.py` and refresh artifacts/status.")
+
+if 'retrain_clicked' in locals() and retrain_clicked:
+    st.divider()
+    st.subheader("Retrain models (sidebar trigger)")
+    with st.spinner("Retraining models... this may take a few minutes"):
+        try:
+            result = subprocess.run([sys.executable, "temp_main.py"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True)
+            st.success("Training completed. Reload the page to see updated artifacts and status.")
+            if result.stdout:
+                st.expander("Training output").text(result.stdout[-4000:])
+            if result.stderr:
+                st.expander("Training errors").text(result.stderr[-4000:])
+        except subprocess.CalledProcessError as exception:
+            st.error("Training failed. See logs below.")
+            st.expander("Training errors").text(exception.stderr or "(no stderr)")
 
 
 
