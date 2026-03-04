@@ -30,12 +30,13 @@ def split_for_training(
     test_size: float = 0.2,
     val_size: float = 0.1,
     calib_frac_of_val: float = 0.5,
+    use_full_dataset: bool = True,
 ):
     """Return train, early-stop, calibration, and test splits (raw data).
     If time_based=True, uses temporal ordering to avoid leakage.
     the validation portion is split into early-stop and calibration subsets.
     """
-    data = clean_data(read_data())
+    data = clean_data(read_data(use_full_dataset=use_full_dataset))
     train_df, val_df, test_df = train_val_test_split(
         data,
         test_size=test_size,

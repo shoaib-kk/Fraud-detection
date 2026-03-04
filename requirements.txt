@@ -4,8 +4,9 @@ numpy
 pandas
 scikit-learn
 lightgbm
-kagglehub
+kaggle
 joblib
 matplotlib
 shap
+pyarrow
 

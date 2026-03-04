@@ -1,26 +1,75 @@
-import pandas as pd 
-import numpy as np 
+import os
+import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
-import kagglehub
-from pathlib import Path 
+from kaggle.api.kaggle_api_extended import KaggleApi
+from pathlib import Path
+import streamlit as st
 from utilities import setup_logger
 logger = setup_logger(__name__)
 
-def read_data():
-    data_path = Path("data/creditcard.csv")
-    if data_path.exists():
-        logger.info("Loading dataset from local file...")
-        data = pd.read_csv(data_path)
-        return data
-    
-    logger.info("Downloading dataset")
-    path = kagglehub.dataset_download("mlg-ulb/creditcardfraud")
+os.environ["KAGGLE_USERNAME"] = st.secrets["KAGGLE_USERNAME"]
+os.environ["KAGGLE_KEY"] = st.secrets["KAGGLE_KEY"]
 
-    data = pd.read_csv(f"{path}/creditcard.csv")
-    data_path.parent.mkdir(parents=True, exist_ok=True)
-    data.to_csv(data_path, index=False)
 
-    return data
+def _ensure_sample_from_full(full_df: pd.DataFrame, sample_path: Path, n_rows: int = 5000) -> pd.DataFrame:
+    """Create a small sample parquet if missing to keep the app offline-friendly."""
+    sample_path.parent.mkdir(parents=True, exist_ok=True)
+    sample_df = full_df.head(n_rows)
+    sample_df.to_parquet(sample_path, index=False)
+    return sample_df
+
+
+def read_data(use_full_dataset: bool = True):
+    data_dir = Path("data")
+    csv_path = data_dir / "creditcard.csv"
+    full_parquet_path = data_dir / "creditcard_full.parquet"
+    sample_path = data_dir / "sample.parquet"
+
+    if not use_full_dataset:
+        if sample_path.exists():
+            logger.info("Loading sample dataset (cached parquet)...")
+            return pd.read_parquet(sample_path)
+
+        if full_parquet_path.exists():
+            logger.info("Sample parquet missing; creating from cached full parquet.")
+            full_df = pd.read_parquet(full_parquet_path)
+            return _ensure_sample_from_full(full_df, sample_path)
+
+        if csv_path.exists():
+            logger.info("Sample parquet missing; creating from existing CSV.")
+            full_df = pd.read_csv(csv_path)
+            return _ensure_sample_from_full(full_df, sample_path)
+
+        raise FileNotFoundError("Sample dataset not found. Ensure data/sample.parquet is present.")
+
+    if full_parquet_path.exists():
+        logger.info("Loading full dataset from cached parquet...")
+        return pd.read_parquet(full_parquet_path)
+
+    if csv_path.exists():
+        logger.info("Converting existing CSV to cached parquet...")
+        full_df = pd.read_csv(csv_path)
+        full_parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        full_df.to_parquet(full_parquet_path, index=False)
+        return full_df
+
+    logger.info("Downloading full dataset (one-time Kaggle fetch)...")
+
+    api = KaggleApi()
+    api.authenticate()
+
+    api.dataset_download_files(
+        "mlg-ulb/creditcardfraud",
+        path=str(data_dir),
+        unzip=True
+    )
+
+    full_df = pd.read_csv(csv_path)
+    full_parquet_path.parent.mkdir(parents=True, exist_ok=True)
+    full_df.to_csv(csv_path, index=False)
+    full_df.to_parquet(full_parquet_path, index=False)
+    return full_df
 
 def validate_data(data: pd.DataFrame):
     expected_columns = ['Time', 'Amount'] + [f'V{i}' for i in range(1, 29)] + ['Class']

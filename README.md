@@ -17,6 +17,7 @@ End-to-end workflow for detecting credit card fraud on the highly imbalanced ULB
 - **Evaluation**: APS, ROC-AUC, confusion matrix, costed threshold search, plus held-out calibration (isotonic/sigmoid) reliability diagrams.
 - **Persistence**: Models and metadata saved to `models/` via [save_models.py](save_models.py) for reproducibility.
 - **App**: Streamlit dashboard in [app/Home.py](app/Home.py) that uses the same pipeline/models as the CLI; shows validation (calibration split) by default with a test-set toggle.
+- **Live demo**: Streamlit deployment at https://fraud-detection-9hgfw2pc2p4afacy22d5ey.streamlit.app/.
 - **Interpretability**: SHAP global importances and per-transaction explanations, plus reliability diagrams with calibrated vs uncalibrated probabilities.
 
 ## Pipeline

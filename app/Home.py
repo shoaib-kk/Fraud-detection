@@ -15,14 +15,14 @@ from utilities import load_json
 
 
 @st.cache_data(show_spinner=False)
-def load_feature_sets():
-    splits = split_for_training(time_based=True)
+def load_feature_sets(use_full_dataset: bool):
+    splits = split_for_training(time_based=True, use_full_dataset=use_full_dataset)
     return build_feature_sets(*splits)
 
 
 @st.cache_resource(show_spinner=True)
-def load_models(retrain: bool):
-    features = load_feature_sets()
+def load_models(use_full_dataset: bool, retrain: bool):
+    features = load_feature_sets(use_full_dataset=use_full_dataset)
     return load_or_train_models(features, retrain=retrain)
 
 
@@ -31,6 +31,11 @@ st.caption("Comparison of LightGBM vs Logistic Regression — validation metrics
 
 with st.sidebar:
     st.header("Controls")
+    use_full_dataset = st.toggle(
+        "Use full dataset",
+        value=False,
+        help="Default uses bundled 5k-row sample (no download). Enable to download and cache the full dataset locally as parquet.",
+    )
     threshold = st.slider("Decision threshold", min_value=0.0, max_value=1.0, value=0.1, step=0.01,
         help="Fraud often uses a low threshold to maximize recall; adjust based on cost and flagged rate.")
     st.caption("At threshold {:.2f}, you'll see flagged rate/recall/cost below.".format(threshold))
@@ -44,10 +49,17 @@ with st.sidebar:
     )
 
 
-with st.spinner("Loading data, features, and models"):
-    features = load_feature_sets()
+dataset_label = "full dataset (~284k rows, cached parquet)" if use_full_dataset else "sample dataset (5k rows, bundled)"
+
+if use_full_dataset:
+    st.info("First use will download the full dataset once, then reuse the cached parquet in data/creditcard_full.parquet.")
+else:
+    st.caption("Using the bundled sample for instant, offline demos. Switch on 'Use full dataset' to run the complete data.")
+
+with st.spinner(f"Loading {dataset_label}, features, and models"):
+    features = load_feature_sets(use_full_dataset=use_full_dataset)
     # If the sidebar retrain button was clicked, reload models with retrain=True
-    models = load_models(retrain=retrain_clicked)
+    models = load_models(use_full_dataset=use_full_dataset, retrain=retrain_clicked)
     y_val = features["y_calib"].values
     y_test = features["y_test"].values
     model_preds_val = {
