@@ -57,6 +57,16 @@ def split_for_training(
             stratify=val_df["Class"],
         )
 
+    # If the calibration slice ended up single-class (e.g., tiny sample with time-based split),
+    # fall back to a stratified split to guarantee both classes when available.
+    if calib_df["Class"].nunique() < 2 and val_df["Class"].nunique() >= 2:
+        early_df, calib_df = train_test_split(
+            val_df,
+            test_size=calib_frac_of_val,
+            random_state=random_state,
+            stratify=val_df["Class"],
+        )
+
     return train_df, early_df, calib_df, test_df
 
 
@@ -170,6 +180,12 @@ def load_or_train_models(features: Dict, retrain: bool = False):
     X_early = features["X_early"]
     y_early = features["y_early"]
 
+    # Helper to grab a small slice for smoke-testing predict_proba
+    def _probe_batch():
+        if len(X_early) > 0:
+            return X_early.iloc[: min(5, len(X_early))]
+        return X_train.iloc[: min(5, len(X_train))]
+
     # Logistic Regression
     if retrain:
         log_model, log_params, log_score = train_log_reg_with_grid(X_train, y_train, X_early, y_early)
@@ -186,6 +202,13 @@ def load_or_train_models(features: Dict, retrain: bool = False):
         log_model, log_params, log_score = train_log_reg_with_grid(X_train, y_train, X_early, y_early)
         save_model(log_model, "logistic_regression", {"average_precision_score": log_score}, log_params)
 
+    # Smoke-test the loaded model; if unusable, retrain and persist
+    try:
+        _ = log_model.predict_proba(_probe_batch())
+    except Exception:
+        log_model, log_params, log_score = train_log_reg_with_grid(X_train, y_train, X_early, y_early)
+        save_model(log_model, "logistic_regression", {"average_precision_score": log_score}, log_params)
+
     # LightGBM
     if retrain:
         lgb_model, lgb_params = train_lightgbm_classifier(X_train, y_train, X_early, y_early)
@@ -199,6 +222,13 @@ def load_or_train_models(features: Dict, retrain: bool = False):
             lgb_metrics = {"average_precision_score": None}
 
     if lgb_model is None or not hasattr(lgb_model, "predict_proba"):
+        lgb_model, lgb_params = train_lightgbm_classifier(X_train, y_train, X_early, y_early)
+        save_model(lgb_model, "lightgbm", {"average_precision_score": None}, lgb_params)
+
+    # Smoke-test LightGBM similarly
+    try:
+        _ = lgb_model.predict_proba(_probe_batch())
+    except Exception:
         lgb_model, lgb_params = train_lightgbm_classifier(X_train, y_train, X_early, y_early)
         save_model(lgb_model, "lightgbm", {"average_precision_score": None}, lgb_params)
 
