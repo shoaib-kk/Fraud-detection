@@ -23,7 +23,19 @@ def load_feature_sets(use_full_dataset: bool):
 @st.cache_resource(show_spinner=True)
 def load_models(use_full_dataset: bool, retrain: bool):
     features = load_feature_sets(use_full_dataset=use_full_dataset)
-    return load_or_train_models(features, retrain=retrain)
+    models = load_or_train_models(features, retrain=retrain)
+
+    # Defensive fallback: if a loaded model is None or lacks predict_proba, retrain once.
+    needs_retrain = False
+    if models.get("log_model") is None or not hasattr(models.get("log_model"), "predict_proba"):
+        needs_retrain = True
+    if models.get("lgb_model") is None or not hasattr(models.get("lgb_model"), "predict_proba"):
+        needs_retrain = True
+
+    if needs_retrain and not retrain:
+        models = load_or_train_models(features, retrain=True)
+
+    return models
 
 
 st.title("Fraud Model Comparison")
