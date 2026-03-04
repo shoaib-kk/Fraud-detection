@@ -182,6 +182,10 @@ def load_or_train_models(features: Dict, retrain: bool = False):
             log_model, log_params, log_score = train_log_reg_with_grid(X_train, y_train, X_early, y_early)
             save_model(log_model, "logistic_regression", {"average_precision_score": log_score}, log_params)
 
+    if log_model is None or not hasattr(log_model, "predict_proba"):
+        log_model, log_params, log_score = train_log_reg_with_grid(X_train, y_train, X_early, y_early)
+        save_model(log_model, "logistic_regression", {"average_precision_score": log_score}, log_params)
+
     # LightGBM
     if retrain:
         lgb_model, lgb_params = train_lightgbm_classifier(X_train, y_train, X_early, y_early)
@@ -193,6 +197,10 @@ def load_or_train_models(features: Dict, retrain: bool = False):
             lgb_model, lgb_params = train_lightgbm_classifier(X_train, y_train, X_early, y_early)
             save_model(lgb_model, "lightgbm", {"average_precision_score": None}, lgb_params)
             lgb_metrics = {"average_precision_score": None}
+
+    if lgb_model is None or not hasattr(lgb_model, "predict_proba"):
+        lgb_model, lgb_params = train_lightgbm_classifier(X_train, y_train, X_early, y_early)
+        save_model(lgb_model, "lightgbm", {"average_precision_score": None}, lgb_params)
 
     return {
         "log_model": log_model,
