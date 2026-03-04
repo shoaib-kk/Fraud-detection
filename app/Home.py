@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import joblib
@@ -7,6 +8,11 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 from sklearn.metrics import average_precision_score, roc_auc_score
+
+# Ensure imports work when Streamlit runs from app/ directory
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from feature_engineering import engineer_features
 from evaluation_metrics import confusion_counts, point_metrics
