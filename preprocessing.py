@@ -41,7 +41,8 @@ def read_data(use_full_dataset: bool = True):
             full_df = pd.read_csv(csv_path)
             return _ensure_sample_from_full(full_df, sample_path)
 
-        raise FileNotFoundError("Sample dataset not found. Ensure data/sample.parquet is present.")
+        logger.info("Sample parquet missing and no cached data; downloading full dataset to create sample.")
+        use_full_dataset = True
 
     if full_parquet_path.exists():
         logger.info("Loading full dataset from cached parquet...")
