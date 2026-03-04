@@ -2,14 +2,9 @@ import os
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from kaggle.api.kaggle_api_extended import KaggleApi
 from pathlib import Path
-import streamlit as st
 from utilities import setup_logger
 logger = setup_logger(__name__)
-
-os.environ["KAGGLE_USERNAME"] = st.secrets["KAGGLE_USERNAME"]
-os.environ["KAGGLE_KEY"] = st.secrets["KAGGLE_KEY"]
 
 
 def _ensure_sample_from_full(full_df: pd.DataFrame, sample_path: Path, n_rows: int = 5000) -> pd.DataFrame:
@@ -56,6 +51,15 @@ def read_data(use_full_dataset: bool = True):
         return full_df
 
     logger.info("Downloading full dataset (one-time Kaggle fetch)...")
+
+    try:
+        import streamlit as st  # Only used to access secrets when available
+        os.environ.setdefault("KAGGLE_USERNAME", st.secrets.get("KAGGLE_USERNAME", ""))
+        os.environ.setdefault("KAGGLE_KEY", st.secrets.get("KAGGLE_KEY", ""))
+    except Exception:
+        logger.info("Streamlit secrets not available; expecting KAGGLE_USERNAME/KAGGLE_KEY in env.")
+
+    from kaggle.api.kaggle_api_extended import KaggleApi  # imported lazily to avoid auth prompts
 
     api = KaggleApi()
     api.authenticate()

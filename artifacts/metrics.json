@@ -1,0 +1,59 @@
+{
+  "threshold": 0.1,
+  "validation": {
+    "LightGBM": {
+      "threshold": 0.1,
+      "flagged_rate": 0.0013342696629213484,
+      "precision": 0.6842105263157895,
+      "recall": 0.6842105263157895,
+      "f1": 0.6842105263157895,
+      "aps": 0.6735657477747957,
+      "roc_auc": 0.8354009452292569,
+      "true_positive": 13,
+      "false_positive": 6,
+      "false_negative": 6,
+      "true_negative": 14215
+    },
+    "Logistic Regression": {
+      "threshold": 0.1,
+      "flagged_rate": 0.0023174157303370788,
+      "precision": 0.48484848484848486,
+      "recall": 0.8421052631578947,
+      "f1": 0.6153846153846154,
+      "aps": 0.7016070708092618,
+      "roc_auc": 0.9588229416097024,
+      "true_positive": 16,
+      "false_positive": 17,
+      "false_negative": 3,
+      "true_negative": 14204
+    }
+  },
+  "test": {
+    "LightGBM": {
+      "threshold": 0.1,
+      "flagged_rate": 0.0014746932111444674,
+      "precision": 0.6904761904761905,
+      "recall": 0.7733333333333333,
+      "f1": 0.729559748427673,
+      "aps": 0.7485540895669056,
+      "roc_auc": 0.9145619894760281,
+      "true_positive": 58,
+      "false_positive": 26,
+      "false_negative": 17,
+      "true_negative": 56860
+    },
+    "Logistic Regression": {
+      "threshold": 0.1,
+      "flagged_rate": 0.0018784782570530714,
+      "precision": 0.5327102803738317,
+      "recall": 0.76,
+      "f1": 0.6263736263736264,
+      "aps": 0.7147557030909927,
+      "roc_auc": 0.9725350115435549,
+      "true_positive": 57,
+      "false_positive": 50,
+      "false_negative": 18,
+      "true_negative": 56836
+    }
+  }
+}

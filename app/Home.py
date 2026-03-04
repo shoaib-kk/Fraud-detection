@@ -1,95 +1,76 @@
-import sys
-import subprocess
+import json
+from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
-from pathlib import Path
 import streamlit as st
 import matplotlib.pyplot as plt
 from sklearn.metrics import average_precision_score, roc_auc_score
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-from pipeline import split_for_training, build_feature_sets, load_or_train_models
+
+from feature_engineering import engineer_features
 from evaluation_metrics import confusion_counts, point_metrics
-from utilities import load_json
 
-
-@st.cache_data(show_spinner=False)
-def load_feature_sets(use_full_dataset: bool):
-    splits = split_for_training(time_based=True, use_full_dataset=use_full_dataset)
-    return build_feature_sets(*splits)
+ARTIFACTS_DIR = Path("artifacts")
+DEFAULT_THRESHOLD = 0.1
 
 
 @st.cache_resource(show_spinner=True)
-def load_models(use_full_dataset: bool, retrain: bool):
-    features = load_feature_sets(use_full_dataset=use_full_dataset)
-    models = load_or_train_models(features, retrain=retrain)
-    # Defensive fallback inside the cache scope.
-    needs_retrain = False
-    if models.get("log_model") is None or not hasattr(models.get("log_model"), "predict_proba"):
-        needs_retrain = True
-    if models.get("lgb_model") is None or not hasattr(models.get("lgb_model"), "predict_proba"):
-        needs_retrain = True
-    if needs_retrain and not retrain:
-        models = load_or_train_models(features, retrain=True)
-    return models
-
-
-st.title("Fraud Model Comparison")
-st.caption("Comparison of LightGBM vs Logistic Regression — validation metrics shown by default; toggle to view held-out test metrics.")
-
-with st.sidebar:
-    st.header("Controls")
-    use_full_dataset = st.toggle(
-        "Use full dataset",
-        value=False,
-        help="Default uses bundled 5k-row sample (no download). Enable to download and cache the full dataset locally as parquet.",
-    )
-    threshold = st.slider("Decision threshold", min_value=0.0, max_value=1.0, value=0.1, step=0.01,
-        help="Fraud often uses a low threshold to maximize recall; adjust based on cost and flagged rate.")
-    st.caption("At threshold {:.2f}, you'll see flagged rate/recall/cost below.".format(threshold))
-    st.divider()
-    false_positive_cost = st.number_input("False positive cost", min_value=0.0, value=1.0, step=0.1)
-    false_negative_cost = st.number_input("False negative cost", min_value=0.0, value=10.0, step=0.1)
-    st.divider()
-    retrain_clicked = st.button(
-        "Run training script (temp_main.py)",
-        help="Runs the full pipeline including SHAP and calibration. May take a few minutes.",
-    )
-
-
-dataset_label = "full dataset (~284k rows, cached parquet)" if use_full_dataset else "sample dataset (5k rows, bundled)"
-
-if use_full_dataset:
-    st.info("First use will download the full dataset once, then reuse the cached parquet in data/creditcard_full.parquet.")
-else:
-    st.caption("Using the bundled sample for instant, offline demos. Switch on 'Use full dataset' to run the complete data.")
-
-with st.spinner(f"Loading {dataset_label}, features, and models"):
-    features = load_feature_sets(use_full_dataset=use_full_dataset)
-    # If the sidebar retrain button was clicked, reload models with retrain=True
-    models = load_models(use_full_dataset=use_full_dataset, retrain=retrain_clicked)
-
-    # If cached models are invalid, force a fresh retrain outside the cache and clear cache.
-    if models.get("log_model") is None or not hasattr(models.get("log_model"), "predict_proba"):
-        models = load_or_train_models(features, retrain=True)
-        load_models.clear()
-    if models.get("lgb_model") is None or not hasattr(models.get("lgb_model"), "predict_proba"):
-        models = load_or_train_models(features, retrain=True)
-        load_models.clear()
-    y_val = features["y_calib"].values
-    y_test = features["y_test"].values
-    model_preds_val = {
-        "LightGBM": models["lgb_model"].predict_proba(features["X_calib"])[:, 1],
-        "Logistic Regression": models["log_model"].predict_proba(features["X_calib"])[:, 1],
-    }
-    model_preds_test = {
-        "LightGBM": models["lgb_model"].predict_proba(features["X_test"])[:, 1],
-        "Logistic Regression": models["log_model"].predict_proba(features["X_test"])[:, 1],
+def load_artifacts():
+    models = {
+        "LightGBM": joblib.load(ARTIFACTS_DIR / "model_lgbm.pkl"),
+        "Logistic Regression": joblib.load(ARTIFACTS_DIR / "model_logreg.pkl"),
     }
 
+    with open(ARTIFACTS_DIR / "feature_columns.json", "r") as f:
+        feature_columns = json.load(f)
+    with open(ARTIFACTS_DIR / "feature_stats.json", "r") as f:
+        feature_stats = json.load(f)
+    metrics = None
+    metrics_path = ARTIFACTS_DIR / "metrics.json"
+    if metrics_path.exists():
+        with open(metrics_path, "r") as f:
+            metrics = json.load(f)
+    threshold = DEFAULT_THRESHOLD
+    threshold_path = ARTIFACTS_DIR / "threshold.json"
+    if threshold_path.exists():
+        with open(threshold_path, "r") as f:
+            threshold = json.load(f).get("threshold", DEFAULT_THRESHOLD)
 
-def summarize_model(name, proba, y_true):
+    return models, feature_columns, feature_stats, metrics, threshold
+
+
+@st.cache_data(show_spinner=False)
+def load_demo_data():
+    sample_path = Path("data/sample.parquet")
+    if sample_path.exists():
+        return pd.read_parquet(sample_path)
+
+    # Synthetic fallback with a few positive cases to avoid empty-class warnings
+    cols = ["Time"] + [f"V{i}" for i in range(1, 29)] + ["Amount", "Class"]
+    rows = []
+    for i in range(200):
+        row = {
+            "Time": float(i * 10),
+            "Amount": float(50 + (i % 10)),
+            "Class": 1 if i % 50 == 0 else 0,
+        }
+        for v in range(1, 29):
+            row[f"V{v}"] = float(np.sin(i + v) * 0.1)
+        rows.append(row)
+    return pd.DataFrame(rows, columns=cols)
+
+
+def prepare_features(df: pd.DataFrame, feature_stats: dict, feature_columns: list[str]):
+    df_fe, _ = engineer_features(df, feature_stats)
+    X = df_fe.reindex(columns=feature_columns, fill_value=0.0)
+    y = df_fe["Class"].values if "Class" in df_fe.columns else None
+    return X, y
+
+
+def summarize_model(name, proba, y_true, threshold, false_positive_cost, false_negative_cost):
+    if y_true is None:
+        return None
     y_pred = (proba >= threshold).astype(int)
     counts = confusion_counts(y_true, y_pred)
     metrics = point_metrics(counts)
@@ -113,193 +94,70 @@ def summarize_model(name, proba, y_true):
     }
 
 
-summary_rows_val = [summarize_model(name, proba, y_val) for name, proba in model_preds_val.items()]
-summary_rows_test = [summarize_model(name, proba, y_test) for name, proba in model_preds_test.items()]
-summary_df_val = pd.DataFrame(summary_rows_val).set_index("Model")
-summary_df_test = pd.DataFrame(summary_rows_test).set_index("Model")
+models, feature_columns, feature_stats, precomputed_metrics, default_threshold = load_artifacts()
 
+demo_df = load_demo_data()
+X_demo, y_demo = prepare_features(demo_df, feature_stats, feature_columns)
 
+st.title("Fraud Model Comparison")
+st.caption("Artifact-driven app: loads pre-trained models and metrics; demo data only.")
 
-st.markdown("**Validation metrics (calibration split, not test)**")
-
-# Highlight models with the best APS and ROC-AUC on validation
-best_aps_model = summary_df_val["APS"].idxmax()
-best_aps_value = summary_df_val.loc[best_aps_model, "APS"]
-best_roc_model = summary_df_val["ROC-AUC"].idxmax()
-best_roc_value = summary_df_val.loc[best_roc_model, "ROC-AUC"]
-
-st.metric("Best APS (val)", f"{best_aps_model}: {best_aps_value:.4f}")
-st.metric("Best ROC-AUC (val)", f"{best_roc_model}: {best_roc_value:.4f}")
-
-st.dataframe(
-    summary_df_val.style.format({
-        "Flagged Rate": "{:.2%}",
-        "Precision": "{:.4f}",
-        "Recall": "{:.4f}",
-        "F1": "{:.4f}",
-        "APS": "{:.4f}",
-        "ROC-AUC": "{:.4f}",
-        "Estimated Cost": "${:,.2f}",
-    }),
-    width="stretch",
-)
-
-st.info(
-    "Fraud framing: default threshold 0.10 leans toward high recall. Adjust costs/threshold to trade off flagged rate vs missed fraud; the table above shows the operational impact (flagged %, caught fraud, estimated cost)."
-)
-
-show_test = st.checkbox("Show test-set metrics", value=False, help="Test set is held-out and never used for training or calibration.")
-if show_test:
-    st.markdown("**Test metrics (held-out)**")
-    st.dataframe(
-        summary_df_test.style.format({
-            "Flagged Rate": "{:.2%}",
-            "Precision": "{:.4f}",
-            "Recall": "{:.4f}",
-            "F1": "{:.4f}",
-            "APS": "{:.4f}",
-            "ROC-AUC": "{:.4f}",
-            "Estimated Cost": "${:,.2f}",
-        }),
-        width="stretch",
+with st.sidebar:
+    st.header("Controls")
+    threshold = st.slider(
+        "Decision threshold",
+        min_value=0.0,
+        max_value=1.0,
+        value=float(default_threshold),
+        step=0.01,
     )
+    false_positive_cost = st.number_input("False positive cost", min_value=0.0, value=1.0, step=0.1)
+    false_negative_cost = st.number_input("False negative cost", min_value=0.0, value=10.0, step=0.1)
+    st.caption("Models and metrics are loaded from artifacts/. No training runs in the app.")
 
-st.divider()
-st.subheader("Threshold Analysis (validation/calibration set)")
+with st.spinner("Running models on demo data"):
+    preds_demo = {
+        name: model.predict_proba(X_demo)[:, 1] for name, model in models.items()
+    }
 
-# Evaluate metrics across thresholds on calibration/validation split
-threshold_grid = np.linspace(0, 1, 51)
-curve_records = []
-for name, proba in model_preds_val.items():
-    for t in threshold_grid:
-        y_pred = (proba >= t).astype(int)
-        counts = confusion_counts(y_val, y_pred)
-        metrics = point_metrics(counts)
-        est_cost = counts["false_positive"] * false_positive_cost + counts["false_negative"] * false_negative_cost
-        curve_records.append({
-            "model": name,
-            "threshold": float(t),
-            "precision": metrics["precision"],
-            "recall": metrics["recall"],
-            "f1": metrics["f1"],
-            "estimated_cost": est_cost,
-        })
-
-curves_df = pd.DataFrame(curve_records)
-
-fig_threshold, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(7, 8), sharex=True)
-
-metric_styles = {
-    "precision": {"color": "tab:blue", "linestyle": "-"},
-    "recall": {"color": "tab:green", "linestyle": "--"},
-    "f1": {"color": "tab:red", "linestyle": "-."},
-}
-
-for name in curves_df["model"].unique():
-    df_m = curves_df[curves_df["model"] == name]
-    for metric, style in metric_styles.items():
-        ax_top.plot(df_m["threshold"], df_m[metric], label=f"{name} {metric.title()}", **style)
-
-    # Mark best cost threshold per model
-    best_index = df_m["estimated_cost"].idxmin()
-    best_threshold = df_m.loc[best_index, "threshold"]
-    ax_top.axvline(best_threshold, color="gray", linestyle=":", alpha=0.3)
-    ax_bottom.axvline(best_threshold, color="gray", linestyle=":", alpha=0.3, label=f"{name} best t={best_threshold:.2f}")
-
-ax_top.set_ylabel("Precision / Recall / F1")
-ax_top.set_xlim(0, 1)
-ax_top.set_ylim(0, 1)
-ax_top.legend(ncol=2)
-ax_top.grid(True, linestyle="--", alpha=0.4)
-
-for name in curves_df["model"].unique():
-    df_m = curves_df[curves_df["model"] == name]
-    ax_bottom.plot(df_m["threshold"], df_m["estimated_cost"], label=f"{name} cost")
-
-ax_bottom.set_xlabel("Decision Threshold")
-ax_bottom.set_ylabel("Estimated Cost")
-ax_bottom.grid(True, linestyle="--", alpha=0.4)
-ax_bottom.legend()
-
-st.pyplot(fig_threshold, width="stretch")
-
-st.divider()
-st.subheader("Explanation of Metrics")
-
-st.divider()
-st.subheader("Interpretability & Calibration (artifacts)")
-
-interp_dir = Path("logs/interpretability")
-artifacts = {
-    "SHAP summary": interp_dir / "shap_summary.png",
-    "Single transaction SHAP": interp_dir / "shap_single.png",
-    "Reliability (calibration)": interp_dir / "reliability_lightgbm.png",
-}
-
-cols = st.columns(len(artifacts))
-for col, (label, path) in zip(cols, artifacts.items()):
-    if path.exists():
-        col.image(str(path), caption=label, use_container_width=True)
-    else:
-        col.warning(f"Missing artifact: {path}")
-
-calib_metrics_path = interp_dir / "calibration_metrics.json"
-calib_metrics = load_json(calib_metrics_path)
-if calib_metrics:
-    st.markdown("**Calibration APS (LightGBM)**")
-    st.json(calib_metrics, expanded=False)
+if y_demo is not None:
+    summary_rows = [
+        summarize_model(name, proba, y_demo, threshold, false_positive_cost, false_negative_cost)
+        for name, proba in preds_demo.items()
+    ]
+    summary_rows = [row for row in summary_rows if row is not None]
+    if summary_rows:
+        summary_df = pd.DataFrame(summary_rows).set_index("Model")
+        st.markdown("**Demo data metrics**")
+        st.dataframe(
+            summary_df.style.format({
+                "Flagged Rate": "{:.2%}",
+                "Precision": "{:.4f}",
+                "Recall": "{:.4f}",
+                "F1": "{:.4f}",
+                "APS": "{:.4f}",
+                "ROC-AUC": "{:.4f}",
+                "Estimated Cost": "${:,.2f}",
+            }),
+            width="stretch",
+        )
 else:
-    st.info(f"Calibration metrics not found at {calib_metrics_path}.")
+    st.info("Demo dataset has no labels; showing precomputed metrics only.")
+
+if precomputed_metrics:
+    st.divider()
+    st.subheader("Precomputed metrics (from training run)")
+    st.json(precomputed_metrics, expanded=False)
 
 st.divider()
-st.subheader("Model Status")
+st.subheader("Score distribution (demo data)")
+fig, ax = plt.subplots(figsize=(6, 3))
+for name, proba in preds_demo.items():
+    ax.hist(proba, bins=40, alpha=0.5, label=name)
+ax.axvline(threshold, color="k", linestyle=":", alpha=0.7)
+ax.set_xlabel("Predicted probability")
+ax.set_ylabel("Count")
+ax.legend()
+st.pyplot(fig, width="stretch")
 
-model_specs = {
-    "LightGBM": {
-        "model": Path("models/lightgbm.pkl"),
-        "metrics": Path("models/lightgbm_metrics.json"),
-    },
-    "Logistic Regression": {
-        "model": Path("models/logistic_regression.pkl"),
-        "metrics": Path("models/logistic_regression_metrics.json"),
-    },
-}
-
-status_rows = []
-for name, spec in model_specs.items():
-    model_exists = spec["model"].exists()
-    metrics = load_json(spec["metrics"])
-    trained_at = metrics.get("trained_at") if metrics else None
-    status_rows.append({
-        "Model": name,
-        "Model file": "yes" if model_exists else "no",
-        "Metrics file": "yes" if metrics else "no",
-        "Trained at": trained_at or "n/a",
-    })
-
-status_df = pd.DataFrame(status_rows).set_index("Model")
-st.dataframe(status_df)
-
-st.caption("Retraining is optional. Use the sidebar button to run `temp_main.py` and refresh artifacts/status.")
-
-if 'retrain_clicked' in locals() and retrain_clicked:
-    st.divider()
-    st.subheader("Retrain models (sidebar trigger)")
-    with st.spinner("Retraining models... this may take a few minutes"):
-        try:
-            result = subprocess.run([sys.executable, "temp_main.py"], cwd=PROJECT_ROOT, capture_output=True, text=True, check=True)
-            st.success("Training completed. Reload the page to see updated artifacts and status.")
-            if result.stdout:
-                st.expander("Training output").text(result.stdout[-4000:])
-            if result.stderr:
-                st.expander("Training errors").text(result.stderr[-4000:])
-        except subprocess.CalledProcessError as exception:
-            st.error("Training failed. See logs below.")
-            st.expander("Training errors").text(exception.stderr or "(no stderr)")
-
-
-
-
-
-
-
+st.caption("Artifacts loaded from artifacts/. Demo data from data/sample.parquet (with synthetic fallback). No training occurs in this app run.")
