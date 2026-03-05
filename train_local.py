@@ -85,13 +85,21 @@ def main():
         },
     }
 
-    # Pretty-print summaries similar to the Streamlit table
     def _print_table(title, data):
         df = pd.DataFrame(data).set_index("Model")
         print(f"\n{title}")
         print(
-            df[["Flagged Rate", "Precision", "Recall", "F1", "APS", "roc_auc"]]
-            .rename(columns={"roc_auc": "ROC-AUC"})
+            df[["flagged_rate", "precision", "recall", "f1", "aps", "roc_auc"]]
+            .rename(
+                columns={
+                    "flagged_rate": "Flagged Rate",
+                    "precision": "Precision",
+                    "recall": "Recall",
+                    "f1": "F1",
+                    "aps": "APS",
+                    "roc_auc": "ROC-AUC",
+                }
+            )
             .to_string(float_format=lambda x: f"{x:.4f}")
         )
 
