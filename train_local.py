@@ -25,7 +25,10 @@ def compute_summary(y_true: np.ndarray, proba: np.ndarray, threshold: float):
     counts = confusion_counts(y_true, y_pred)
     metrics = point_metrics(counts)
     aps = average_precision_score(y_true, proba)
-    roc_auc = roc_auc_score(y_true, proba)
+    try:
+        roc_auc = roc_auc_score(y_true, proba)
+    except Exception:
+        roc_auc = float("nan")
     return {
         "threshold": threshold,
         "flagged_rate": float((y_pred == 1).mean()),
@@ -81,6 +84,28 @@ def main():
             "Logistic Regression": compute_summary(features["y_test"].values, lgr_test, DEFAULT_THRESHOLD),
         },
     }
+
+    # Pretty-print summaries similar to the Streamlit table
+    def _print_table(title, data):
+        df = pd.DataFrame(data).set_index("Model")
+        print(f"\n{title}")
+        print(
+            df[["Flagged Rate", "Precision", "Recall", "F1", "APS", "roc_auc"]]
+            .rename(columns={"roc_auc": "ROC-AUC"})
+            .to_string(float_format=lambda x: f"{x:.4f}")
+        )
+
+    val_rows = [
+        {"Model": "LightGBM", **metrics["validation"]["LightGBM"]},
+        {"Model": "Logistic Regression", **metrics["validation"]["Logistic Regression"]},
+    ]
+    test_rows = [
+        {"Model": "LightGBM", **metrics["test"]["LightGBM"]},
+        {"Model": "Logistic Regression", **metrics["test"]["Logistic Regression"]},
+    ]
+
+    _print_table("Validation metrics (calibration split)", val_rows)
+    _print_table("Test metrics (held-out)", test_rows)
 
     joblib.dump(models["lgb_model"], ARTIFACTS_DIR / "model_lgbm.pkl")
     joblib.dump(models["log_model"], ARTIFACTS_DIR / "model_logreg.pkl")
