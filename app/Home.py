@@ -122,6 +122,17 @@ def compute_alert_vs_recall(y_true: np.ndarray, preds: dict[str, np.ndarray], th
     return records
 
 
+@st.cache_data(show_spinner=False)
+def shap_bar_figure(model, X):
+    explainer = shap.TreeExplainer(model)
+    vals = explainer.shap_values(X)
+    shap_pos = vals[1] if isinstance(vals, list) else vals
+    shap.summary_plot(shap_pos, X, show=False, plot_type="bar")
+    fig = plt.gcf()
+    plt.close(fig)
+    return fig
+
+
 models, feature_columns, feature_stats, precomputed_metrics, default_threshold = load_artifacts()
 
 demo_df = load_demo_data()
@@ -141,6 +152,7 @@ with st.sidebar:
     )
     false_positive_cost = st.number_input("False positive cost", min_value=0.0, value=1.0, step=0.1)
     false_negative_cost = st.number_input("False negative cost", min_value=0.0, value=10.0, step=0.1)
+    focus_model = st.radio("Focus model", list(models.keys()), index=0)
     st.caption("Models and metrics are loaded from artifacts/. No training runs in the app.")
 
 with st.spinner("Running models on demo data"):
@@ -156,6 +168,13 @@ if y_demo is not None:
     summary_rows = [row for row in summary_rows if row is not None]
     if summary_rows:
         summary_df = pd.DataFrame(summary_rows).set_index("Model")
+        st.subheader("At-a-glance")
+        c1, c2, c3, c4 = st.columns(4)
+        row = summary_df.loc[focus_model]
+        c1.metric("Model", focus_model)
+        c2.metric("Precision", f"{row['Precision']:.3f}")
+        c3.metric("Recall", f"{row['Recall']:.3f}")
+        c4.metric("Alerts flagged", f"{row['Flagged Rate']:.2%}")
         st.markdown("**Demo data metrics**")
         st.dataframe(
             summary_df.style.format({
@@ -209,8 +228,9 @@ st.divider()
 st.subheader("Score distribution (demo data)")
 fig, ax = plt.subplots(figsize=(6, 3))
 for name, proba in preds_demo.items():
-    ax.hist(proba, bins=40, alpha=0.5, label=name)
-ax.axvline(threshold, color="k", linestyle=":", alpha=0.7)
+    alpha = 0.75 if name == focus_model else 0.35
+    ax.hist(proba, bins=40, alpha=alpha, label=name, edgecolor="black" if name == focus_model else None)
+ax.axvline(threshold, color="k", linestyle=":", alpha=0.7, label="Threshold")
 ax.set_xlabel("Predicted probability")
 ax.set_ylabel("Count")
 ax.legend()
@@ -219,32 +239,30 @@ st.pyplot(fig, width="stretch")
 if y_demo is not None:
     st.divider()
     st.subheader("Confusion Matrix (demo data)")
-    for name, proba in preds_demo.items():
-        y_pred = (proba >= threshold).astype(int)
-        cm = confusion_matrix(y_demo, y_pred, labels=[0, 1])
-        fig_cm, ax_cm = plt.subplots(figsize=(4, 3))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax_cm)
-        ax_cm.set_title(name)
-        ax_cm.set_xlabel("Predicted")
-        ax_cm.set_ylabel("Actual")
-        st.pyplot(fig_cm, width="stretch")
-        plt.close(fig_cm)
+    proba = preds_demo.get(focus_model)
+    y_pred = (proba >= threshold).astype(int)
+    cm = confusion_matrix(y_demo, y_pred, labels=[0, 1])
+    fig_cm, ax_cm = plt.subplots(figsize=(4, 3))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax_cm)
+    ax_cm.set_title(focus_model)
+    ax_cm.set_xlabel("Predicted")
+    ax_cm.set_ylabel("Actual")
+    st.pyplot(fig_cm, width="stretch")
+    plt.close(fig_cm)
 
 st.divider()
 st.subheader("SHAP Feature Importance (LightGBM)")
-try:
-    sample_shap = X_demo.copy()
-    if len(sample_shap) > 500:
-        sample_shap = sample_shap.sample(500, random_state=42)
-    lgb_model = models.get("LightGBM")
-    explainer = shap.TreeExplainer(lgb_model)
-    shap_vals = explainer.shap_values(sample_shap)
-    shap_pos = shap_vals[1] if isinstance(shap_vals, list) else shap_vals
-    shap.summary_plot(shap_pos, sample_shap, show=False, plot_type="bar")
-    fig_shap = plt.gcf()
-    st.pyplot(fig_shap, width="stretch")
-    plt.close(fig_shap)
-except Exception as e:
-    st.warning(f"Could not render SHAP summary: {e}")
+if focus_model == "LightGBM":
+    try:
+        sample_shap = X_demo.copy()
+        if len(sample_shap) > 500:
+            sample_shap = sample_shap.sample(500, random_state=42)
+        lgb_model = models.get("LightGBM")
+        fig_shap = shap_bar_figure(lgb_model, sample_shap)
+        st.pyplot(fig_shap, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not render SHAP summary: {e}")
+else:
+    st.info("SHAP available when LightGBM is the focus model.")
 
 st.caption("Artifacts loaded from artifacts/. Demo data from data/sample.parquet (with synthetic fallback). No training occurs in this app run.")
