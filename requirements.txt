@@ -9,4 +9,5 @@ joblib
 matplotlib
 shap
 pyarrow
+seaborn
 
