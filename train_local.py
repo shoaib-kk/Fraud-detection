@@ -44,6 +44,33 @@ def compute_summary(y_true: np.ndarray, proba: np.ndarray, threshold: float):
     }
 
 
+def _app_style_summary(y_true, proba, threshold: float):
+    y_pred = (proba >= threshold).astype(int)
+    counts = confusion_counts(y_true, y_pred)
+    metrics = point_metrics(counts)
+    aps = average_precision_score(y_true, proba)
+    try:
+        from sklearn.metrics import roc_auc_score
+
+        roc_auc = roc_auc_score(y_true, proba)
+    except Exception:
+        roc_auc = float("nan")
+    return {
+        "Model": "",
+        "Flagged Rate": float((y_pred == 1).mean()),
+        "Precision": metrics["precision"],
+        "Recall": metrics["recall"],
+        "F1": metrics["f1"],
+        "APS": float(aps),
+        "ROC-AUC": float(roc_auc),
+        "threshold": threshold,
+        "True positive": int(counts["true_positive"]),
+        "False positive": int(counts["false_positive"]),
+        "False negative": int(counts["false_negative"]),
+        "True negative": int(counts["true_negative"]),
+    }
+
+
 def main():
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -88,28 +115,15 @@ def main():
     def _print_table(title, data):
         df = pd.DataFrame(data).set_index("Model")
         print(f"\n{title}")
-        print(
-            df[["flagged_rate", "precision", "recall", "f1", "aps", "roc_auc"]]
-            .rename(
-                columns={
-                    "flagged_rate": "Flagged Rate",
-                    "precision": "Precision",
-                    "recall": "Recall",
-                    "f1": "F1",
-                    "aps": "APS",
-                    "roc_auc": "ROC-AUC",
-                }
-            )
-            .to_string(float_format=lambda x: f"{x:.4f}")
-        )
+        print(df[["Flagged Rate", "Precision", "Recall", "F1", "APS", "ROC-AUC"]].to_string(float_format=lambda x: f"{x:.4f}"))
 
     val_rows = [
-        {"Model": "LightGBM", **metrics["validation"]["LightGBM"]},
-        {"Model": "Logistic Regression", **metrics["validation"]["Logistic Regression"]},
+        {"Model": "LightGBM", **_app_style_summary(features["y_calib"].values, lgb_val, DEFAULT_THRESHOLD)},
+        {"Model": "Logistic Regression", **_app_style_summary(features["y_calib"].values, lgr_val, DEFAULT_THRESHOLD)},
     ]
     test_rows = [
-        {"Model": "LightGBM", **metrics["test"]["LightGBM"]},
-        {"Model": "Logistic Regression", **metrics["test"]["Logistic Regression"]},
+        {"Model": "LightGBM", **_app_style_summary(features["y_test"].values, lgb_test, DEFAULT_THRESHOLD)},
+        {"Model": "Logistic Regression", **_app_style_summary(features["y_test"].values, lgr_test, DEFAULT_THRESHOLD)},
     ]
 
     _print_table("Validation metrics (calibration split)", val_rows)
