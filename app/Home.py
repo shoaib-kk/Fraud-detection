@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
-from sklearn.metrics import average_precision_score, roc_auc_score
+import seaborn as sns
+import shap
+from sklearn.metrics import average_precision_score, roc_auc_score, precision_recall_curve, confusion_matrix
 
 # Ensure imports work when Streamlit runs from app/ directory
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +102,26 @@ def summarize_model(name, proba, y_true, threshold, false_positive_cost, false_n
     }
 
 
+def compute_pr_curves(y_true: np.ndarray, preds: dict[str, np.ndarray]):
+    curves = {}
+    for name, proba in preds.items():
+        precision, recall, _ = precision_recall_curve(y_true, proba)
+        curves[name] = (precision, recall)
+    return curves
+
+
+def compute_alert_vs_recall(y_true: np.ndarray, preds: dict[str, np.ndarray], thresholds: np.ndarray):
+    records = {name: [] for name in preds}
+    total = len(y_true)
+    for t in thresholds:
+        for name, proba in preds.items():
+            y_pred = (proba >= t).astype(int)
+            recall = (y_pred[y_true == 1].mean() if (y_true == 1).any() else 0.0)
+            flagged = y_pred.sum()
+            records[name].append((float(t), float(recall), int(flagged), flagged / total))
+    return records
+
+
 models, feature_columns, feature_stats, precomputed_metrics, default_threshold = load_artifacts()
 
 demo_df = load_demo_data()
@@ -155,6 +177,34 @@ if precomputed_metrics:
     st.subheader("Precomputed metrics (from training run)")
     st.json(precomputed_metrics, expanded=False)
 
+if y_demo is not None and len(np.unique(y_demo)) > 1:
+    st.divider()
+    st.subheader("Precision–Recall Curve (demo data)")
+    pr_curves = compute_pr_curves(y_demo, preds_demo)
+    fig_pr, ax_pr = plt.subplots(figsize=(6, 4))
+    for name, (prec, rec) in pr_curves.items():
+        ax_pr.plot(rec, prec, label=name)
+    ax_pr.set_xlabel("Recall")
+    ax_pr.set_ylabel("Precision")
+    ax_pr.grid(True, linestyle="--", alpha=0.4)
+    ax_pr.legend()
+    st.pyplot(fig_pr, width="stretch")
+
+    st.subheader("Alert Volume vs Recall")
+    thresholds = np.linspace(0, 1, 51)
+    alert_curves = compute_alert_vs_recall(y_demo, preds_demo, thresholds)
+    fig_alert, ax_alert = plt.subplots(figsize=(6, 4))
+    for name, points in alert_curves.items():
+        ts, recalls, flagged, flagged_rate = zip(*points)
+        ax_alert.plot(flagged, recalls, label=name)
+    ax_alert.set_xlabel("Alerts (count)")
+    ax_alert.set_ylabel("Recall")
+    ax_alert.grid(True, linestyle="--", alpha=0.4)
+    ax_alert.legend()
+    st.pyplot(fig_alert, width="stretch")
+else:
+    st.info("PR and alert-volume curves need labels with both classes in the demo data.")
+
 st.divider()
 st.subheader("Score distribution (demo data)")
 fig, ax = plt.subplots(figsize=(6, 3))
@@ -165,5 +215,36 @@ ax.set_xlabel("Predicted probability")
 ax.set_ylabel("Count")
 ax.legend()
 st.pyplot(fig, width="stretch")
+
+if y_demo is not None:
+    st.divider()
+    st.subheader("Confusion Matrix (demo data)")
+    for name, proba in preds_demo.items():
+        y_pred = (proba >= threshold).astype(int)
+        cm = confusion_matrix(y_demo, y_pred, labels=[0, 1])
+        fig_cm, ax_cm = plt.subplots(figsize=(4, 3))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax_cm)
+        ax_cm.set_title(name)
+        ax_cm.set_xlabel("Predicted")
+        ax_cm.set_ylabel("Actual")
+        st.pyplot(fig_cm, width="stretch")
+        plt.close(fig_cm)
+
+st.divider()
+st.subheader("SHAP Feature Importance (LightGBM)")
+try:
+    sample_shap = X_demo.copy()
+    if len(sample_shap) > 500:
+        sample_shap = sample_shap.sample(500, random_state=42)
+    lgb_model = models.get("LightGBM")
+    explainer = shap.TreeExplainer(lgb_model)
+    shap_vals = explainer.shap_values(sample_shap)
+    shap_pos = shap_vals[1] if isinstance(shap_vals, list) else shap_vals
+    shap.summary_plot(shap_pos, sample_shap, show=False, plot_type="bar")
+    fig_shap = plt.gcf()
+    st.pyplot(fig_shap, width="stretch")
+    plt.close(fig_shap)
+except Exception as e:
+    st.warning(f"Could not render SHAP summary: {e}")
 
 st.caption("Artifacts loaded from artifacts/. Demo data from data/sample.parquet (with synthetic fallback). No training occurs in this app run.")
