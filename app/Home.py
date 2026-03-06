@@ -123,8 +123,8 @@ def compute_alert_vs_recall(y_true: np.ndarray, preds: dict[str, np.ndarray], th
 
 
 @st.cache_data(show_spinner=False)
-def shap_bar_figure(model, X):
-    explainer = shap.TreeExplainer(model)
+def shap_bar_figure(_model, X):
+    explainer = shap.TreeExplainer(_model)
     vals = explainer.shap_values(X)
     shap_pos = vals[1] if isinstance(vals, list) else vals
     shap.summary_plot(shap_pos, X, show=False, plot_type="bar")

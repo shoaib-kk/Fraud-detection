@@ -33,13 +33,13 @@ End-to-end workflow for detecting credit card fraud on the highly imbalanced ULB
 8) **Visualize**: Streamlit dashboard plots precision/recall/F1 vs. threshold and estimated cost trade-offs in [app/Home.py](app/Home.py).
 
 ## Results (test split, threshold = 0.10)
-| Model | APS | ROC-AUC | Precision@0.10 | Recall | F1 | False Positives | False Negatives |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| LightGBM | 0.7486 | 0.9146 | 0.6905 | 0.7733 | 0.7296 | 26 | 17 |
-| Logistic Regression | 0.7775 | 0.9892 | 0.0081 | 0.9867 | 0.0160 | 9079 | 1 |
+| Model | APS | ROC-AUC | Precision@0.10 | Recall | F1 | False Positives | False Negatives | True Positives |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LightGBM | 0.7486 | 0.9146 | 0.6905 | 0.7733 | 0.7296 | 26 | 17 | 58 |
+| Logistic Regression | 0.7148 | 0.9725 | 0.5327 | 0.7600 | 0.6264 | 50 | 18 | 57 |
 
 Notes:
-- LightGBM offers far fewer false positives and higher precision; Logistic Regression maximizes recall at heavy false-positive cost.
+- LightGBM offers the best precision with fewer false positives; Logistic Regression trades some precision for similar recall and more false positives.
 - APS/ROC-AUC indicate strong ranking; operational threshold should reflect fraud costs and flagged-rate budgets.
 - SHAP + calibration artifacts: see `logs/interpretability/*.png` and `logs/interpretability/calibration_metrics.json`.
 
